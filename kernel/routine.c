@@ -75,7 +75,7 @@ static int pre_arm64_ioprio_set(struct kprobe *p, struct pt_regs *regs)
 	return 0;
 }
 
-static int entry_arm64_getpriority(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int pre_arm64_getpriority(struct kprobe *p, struct pt_regs *regs)
 {
 	struct pt_regs *sc = sc_regs(regs);
 
@@ -88,7 +88,7 @@ static int entry_arm64_getpriority(struct kretprobe_instance *ri, struct pt_regs
 	return 0;
 }
 
-static int entry_arm64_ioprio_get(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int pre_arm64_ioprio_get(struct kprobe *p, struct pt_regs *regs)
 {
 	struct pt_regs *sc = sc_regs(regs);
 
@@ -101,40 +101,18 @@ static int entry_arm64_ioprio_get(struct kretprobe_instance *ri, struct pt_regs 
 	return 0;
 }
 
-static int ret_dummy(struct kretprobe_instance *ri, struct pt_regs *regs)
-{
-	return 0;
-}
-
-#define kp_setter(suffix, name) { .symbol_name = "__arm64" #suffix "_sys_" #name, .pre_handler = pre_arm64_##name }
-#define kp_setter_native(name) kp_setter(, name)
-
-#define kp_getter(suffix, name) {						\
-	.kp.symbol_name = "__arm64" #suffix "_sys_" #name,	\
-	.entry_handler = entry_arm64_##name,				\
-	.handler = ret_dummy,								\
-	.maxactive = 128,									\
-	.data_size = 0,										\
-}
-#define kp_getter_native(name) kp_getter(, name)
+#define kp_priority(name) { .symbol_name = "__arm64_sys_" #name, .pre_handler = pre_arm64_##name }
 
 // native
-static struct kprobe kp_arm64_setpriority    = kp_setter_native(setpriority);
-static struct kprobe kp_arm64_ioprio_set     = kp_setter_native( ioprio_set);
-static struct kretprobe kp_arm64_getpriority = kp_getter_native(getpriority);
-static struct kretprobe kp_arm64_ioprio_get  = kp_getter_native( ioprio_get);
+static struct kprobe kp_arm64_setpriority = kp_priority(setpriority);
+static struct kprobe kp_arm64_ioprio_set   = kp_priority(ioprio_set);
+static struct kprobe kp_arm64_getpriority = kp_priority(getpriority);
+static struct kprobe kp_arm64_ioprio_get  = kp_priority(ioprio_get);
 
 static __always_inline int register_kprobe_log(struct kprobe *kp, const char *name)
 {
 	int ret = register_kprobe(kp);
 	pr_info("%s: register kprobe %s, ret: %d\n", __func__, name, ret);
-	return ret;
-}
-
-static __always_inline int register_kretprobe_log(struct kretprobe *kp, const char *name)
-{
-	int ret = register_kretprobe(kp);
-	pr_info("%s: register kretprobe %s, ret: %d\n", __func__, name, ret);
 	return ret;
 }
 
@@ -145,25 +123,18 @@ static __always_inline void unregister_kprobe_log(struct kprobe *kp, const char 
 	pr_info("%s: unregister kprobe %s\n", __func__, name);
 }
 
-static __always_inline void unregister_kretprobe_log(struct kretprobe *kp, const char *name)
-{
-	if (!kp_is_registered(&kp->kp)) return;
-	unregister_kretprobe(kp);
-	pr_info("%s: unregister kretprobe %s\n", __func__, name);
-}
-
 static __init int getpriority_hook_init(void)
 {
 	int ret;
 
 	if ((ret = register_kprobe_log(&kp_arm64_setpriority, "setpriority"))  < 0) goto return_with;
 	if ((ret = register_kprobe_log(&kp_arm64_ioprio_set, "ioprio_set")) < 0) goto f2;
-	if ((ret = register_kretprobe_log(&kp_arm64_getpriority, "getpriority"))  < 0) goto f3;
-	if ((ret = register_kretprobe_log(&kp_arm64_ioprio_get, "ioprio_get")) < 0) goto f4;
+	if ((ret = register_kprobe_log(&kp_arm64_getpriority, "getpriority"))  < 0) goto f3;
+	if ((ret = register_kprobe_log(&kp_arm64_ioprio_get, "ioprio_get")) < 0) goto f4;
 
 	goto return_with;
 
-f4: unregister_kretprobe(&kp_arm64_getpriority);
+f4: unregister_kprobe(&kp_arm64_getpriority);
 f3: unregister_kprobe(&kp_arm64_ioprio_set);
 f2: unregister_kprobe(&kp_arm64_setpriority);
 
@@ -175,8 +146,8 @@ static int getpriority_hook_exit(void)
 {
 	unregister_kprobe_log(&kp_arm64_setpriority, "setpriority");
 	unregister_kprobe_log(&kp_arm64_ioprio_set, "ioprio_set");
-	unregister_kretprobe_log(&kp_arm64_getpriority, "getpriority");
-	unregister_kretprobe_log(&kp_arm64_ioprio_get, "ioprio_get");
+	unregister_kprobe_log(&kp_arm64_getpriority, "getpriority");
+	unregister_kprobe_log(&kp_arm64_ioprio_get, "ioprio_get");
 
 	pr_info("%s: exit OK\n", __func__);
 	return 0;
