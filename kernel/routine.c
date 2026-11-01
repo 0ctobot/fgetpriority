@@ -8,60 +8,32 @@
  *
  */
 
+#include <linux/cred.h>
+#include <linux/user_namespace.h>
+
 #include "routine.h"
 
 static __always_inline bool getpriority_should_swap(int which, int who, const bool is_io)
 {
+	kuid_t caller, target;
+
+	if (which != (is_io ? IOPRIO_WHO_USER : PRIO_USER) || !who)
+		return false;
+
 	if (unlikely(!is_seccomp_enabled()))
 		return false;
 
-	// only filter appuid calls
-	int cuid = current_uid().val;
-	if (unlikely(cuid < MIN_APP_PROCESS_UID || who < MIN_APP_PROCESS_UID))
+	caller = current_uid();
+	if (__kuid_val(caller) % AID_USER_OFFSET < MIN_APP_PROCESS_UID)
 		return false;
 
-	if (unlikely(cuid >= AID_USER_OFFSET))
-		cuid %= AID_USER_OFFSET;
-
-	// convert all isolated processes to appuids
-	if (unlikely(cuid >= MIN_ISOLATED_PROCESS_UID))
-	{
-		struct user_namespace *ns = current_cred()->user_ns;
-		if (ns && ns != &init_user_ns)
-		{
-			kuid_t host_kuid = make_kuid(ns, 0);
-			if (uid_valid(host_kuid))
-				cuid = from_kuid(&init_user_ns, host_kuid);
-		}
-	}
-
-	if (unlikely(who >= MIN_ISOLATED_PROCESS_UID))
-	{
-		struct user_namespace *ns = current_cred()->user_ns;
-		if (ns && ns != &init_user_ns)
-		{
-			kuid_t host_kuid = make_kuid(ns, 0);
-			if (uid_valid(host_kuid))
-				who = from_kuid(&init_user_ns, host_kuid);
-		}
-	}
-
-	if (unlikely(who >= AID_USER_OFFSET))
-	    who %= AID_USER_OFFSET;
-
-	if (likely(cuid == who))
+	/* who is relative to the caller's user namespace, just like the syscall. */
+	target = make_kuid(current_user_ns(), (uid_t)who);
+	if (!uid_valid(target) || uid_eq(caller, target))
 		return false;
 
-	if (!is_io && which != PRIO_USER)
-		return false;
-
-	if (is_io && which != IOPRIO_WHO_USER)
-		return false;
-
-//	pr_info("ksu_getpriority: caller: %d paramms: %d / %d comm: %s \n", current_uid().val, which, who, current->comm);
-
-//	pr_info("getpriority: uid: %d is set! \n", who);
-	return true;
+	/* Strip the Android user ID only for classification, never equality. */
+	return __kuid_val(target) % AID_USER_OFFSET >= MIN_APP_PROCESS_UID;
 }
 
 #if IS_ENABLED(CONFIG_KPROBES)
